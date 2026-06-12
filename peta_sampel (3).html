@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Peta Pembagian Titik Sampel</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<style>
+  :root{
+    --bg:#161b19;
+    --panel:#212824;
+    --panel2:#2a322d;
+    --ink:#eef1ee;
+    --muted:#8fa19a;
+    --line:#37423c;
+    --accent:#f4f1ea;
+    --sheet-collapsed: 116px;
+    --sheet-half: 50vh;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--ink);overflow:hidden;}
+
+  #map{position:fixed;inset:0;z-index:1;}
+
+  .topbar{
+    position:fixed;top:0;left:0;right:0;z-index:30;
+    padding:max(10px, env(safe-area-inset-top)) 14px 10px;
+    background:linear-gradient(to bottom, rgba(22,27,25,0.92), rgba(22,27,25,0));
+    pointer-events:none;
+  }
+  .topbar h1{
+    margin:0;font-size:1rem;font-family:Georgia,'Times New Roman',serif;letter-spacing:.3px;
+    text-shadow:0 1px 4px rgba(0,0,0,.5);
+  }
+
+  .tabs{
+    position:fixed; top:max(46px, calc(env(safe-area-inset-top) + 36px)); left:0; right:0; z-index:30;
+    display:flex; gap:8px; padding:0 14px; overflow-x:auto;
+  }
+  .tab{
+    flex:0 0 auto;
+    display:flex;align-items:center;gap:6px;
+    padding:7px 12px;border-radius:999px;
+    background:rgba(33,40,36,0.9);
+    border:1px solid var(--line);
+    font-size:0.78rem;font-weight:600;color:var(--ink);
+    backdrop-filter:blur(4px);
+    cursor:pointer; white-space:nowrap;
+    transition:background .15s ease, border-color .15s ease;
+  }
+  .tab .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .tab.active{border-color:var(--accent);}
+  .tab .count{color:var(--muted);font-weight:400;}
+
+  .sheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:40;
+    background:var(--panel);
+    border-top-left-radius:18px; border-top-right-radius:18px;
+    box-shadow:0 -6px 24px rgba(0,0,0,0.35);
+    height: var(--sheet-half);
+    max-height:88vh;
+    transform: translateY(calc(var(--sheet-half) - var(--sheet-collapsed)));
+    transition: transform .28s cubic-bezier(.2,.8,.2,1), height .28s ease;
+    display:flex; flex-direction:column;
+    touch-action:none;
+  }
+  .sheet.expanded{ transform: translateY(0); }
+  .sheet.full{ height:92vh; transform:translateY(0); }
+
+  .sheet-handle{
+    flex-shrink:0;
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+    padding:10px 16px 8px; cursor:grab;
+  }
+  .grabber{width:42px;height:5px;border-radius:3px;background:var(--line);}
+
+  .sheet-summary{
+    display:flex; align-items:center; justify-content:space-between;
+    width:100%;
+  }
+  .sheet-summary .title{
+    display:flex; align-items:center; gap:8px;
+    font-weight:700; font-size:0.95rem;
+  }
+  .sheet-summary .swatch{width:13px;height:13px;border-radius:4px;flex-shrink:0;}
+  .sheet-summary .meta{font-size:0.76rem;color:var(--muted);}
+
+  .sheet-body{
+    flex:1; overflow-y:auto; padding:4px 16px 24px;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  .day-card{
+    background:var(--panel2);
+    border:1px solid var(--line);
+    border-radius:12px;
+    margin-bottom:12px;
+    overflow:hidden;
+  }
+  .day-card-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:11px 14px; cursor:pointer; user-select:none;
+  }
+  .day-card-head .left{display:flex;align-items:center;gap:8px;font-weight:700;font-size:0.88rem;}
+  .day-badge{
+    width:24px;height:24px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:0.75rem;font-weight:800;color:#161b19;
+  }
+  .day-card-head .right{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:0.74rem;}
+  .chev{transition:transform .2s ease;color:var(--muted);font-size:0.8rem;}
+  .day-card.open .chev{transform:rotate(180deg);}
+
+  .day-card-body{display:none;padding:0 14px 14px;}
+  .day-card.open .day-card-body{display:block;}
+
+  .stop-list{list-style:none;margin:0 0 10px;padding:0;display:flex;flex-direction:column;gap:6px;}
+  .stop-list li{
+    display:flex;align-items:center;gap:10px;
+    background:var(--bg);border:1px solid var(--line);
+    border-radius:8px; padding:8px 10px; font-size:0.78rem;
+  }
+  .stop-num{
+    width:22px;height:22px;border-radius:50%;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+    font-size:0.72rem;font-weight:800;color:#161b19;
+  }
+  .stop-coord{color:var(--muted);font-size:0.72rem;margin-left:auto;}
+
+  .gmaps-btn{
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    background:var(--accent);color:#1c2321;
+    text-decoration:none;font-weight:700;font-size:0.84rem;
+    padding:11px 12px;border-radius:9px;
+    transition:filter 0.15s ease;
+  }
+  .gmaps-btn:active{filter:brightness(0.9);}
+  .gmaps-btn::before{
+    content:"";display:inline-block;width:16px;height:16px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%234285F4' d='M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z'/%3E%3C/svg%3E");
+    background-size:contain;background-repeat:no-repeat;
+  }
+
+  .layer-toggles{
+    display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 14px;
+  }
+  .chip{
+    display:flex;align-items:center;gap:6px;
+    border:1px solid var(--line); border-radius:999px;
+    padding:6px 11px; font-size:0.74rem; color:var(--muted);
+    cursor:pointer; user-select:none; transition:all .15s ease;
+  }
+  .chip.on{color:var(--ink); border-color:var(--accent);}
+  .chip .ind{width:8px;height:8px;border-radius:50%;}
+
+  .route-stats{font-size:0.76rem;color:var(--muted);margin-bottom:10px;}
+
+  .start-note{
+    display:flex;align-items:center;gap:8px;
+    font-size:0.74rem;color:var(--muted);
+    padding:8px 0 4px;border-top:1px solid var(--line);margin-top:4px;
+  }
+  .start-note .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);flex-shrink:0;}
+
+  .leaflet-popup-content-wrapper{background:var(--panel);color:var(--ink);border-radius:8px;}
+  .leaflet-popup-tip{background:var(--panel);}
+  .leaflet-popup-content{font-size:0.8rem;margin:8px 10px;}
+  .leaflet-control-attribution{font-size:9px;}
+
+  @media (min-width: 860px){
+    body{overflow:auto;}
+    #map{position:fixed; left:340px; right:0; top:0; bottom:0;}
+    .tabs{left:354px; top:18px;}
+    .sheet{
+      left:0; right:auto; top:0; bottom:0; width:340px;
+      height:100vh; max-height:100vh;
+      transform:none !important;
+      border-radius:0; border-right:1px solid var(--line);
+      box-shadow:none;
+    }
+    .sheet-handle{cursor:default; padding-top:18px;}
+    .grabber{display:none;}
+    .sheet-body{padding-bottom:24px;}
+    .topbar{display:none;}
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="topbar"><h1>Pembagian Titik Sampel — 3 Hari</h1></div>
+
+<div class="tabs" id="tabs"></div>
+
+<div class="sheet expanded" id="sheet">
+  <div class="sheet-handle" id="sheetHandle">
+    <div class="grabber"></div>
+    <div class="sheet-summary">
+      <div class="title">
+        <span class="swatch" id="sheetSwatch"></span>
+        <span id="sheetTitle">Kelompok</span>
+      </div>
+      <div class="meta" id="sheetMeta">20 titik</div>
+    </div>
+  </div>
+  <div class="sheet-body" id="sheetBody"></div>
+</div>
+
+<script>
+const START = [-8.75373864883444, 116.2505429109484];
+
+const RAW = {
+  barat: [[116.1834743806, -8.7009915734], [116.1909258636, -8.6433619278], [116.1942875587, -8.6654608052], [116.197676423, -8.693774594], [116.1976942, -8.678581292], [116.1978692018, -8.6917584035], [116.2006002347, -8.6574374069], [116.2023621935, -8.6424162389], [116.2028494911, -8.6817895279], [116.203028691, -8.691123506], [116.206588707, -8.637223454], [116.2066704095, -8.6749939599], [116.207265862, -8.704807295], [116.2075908614, -8.6730396731], [116.209163059, -8.649251359], [116.2092715205, -8.6346549183], [116.211346821, -8.662931912], [116.2129738596, -8.6699670929], [116.2132532103, -8.6825178849], [116.2140861368, -8.6578867154]],
+  tengah: [[116.214111079, -8.6980097234], [116.2155266243, -8.7090366083], [116.2159123261, -8.6549053738], [116.2165012282, -8.6712852644], [116.2173722253, -8.689941934], [116.2184795811, -8.6597653682], [116.2189459048, -8.6662870391], [116.2189740354, -8.6946950005], [116.2194659095, -8.6845510621], [116.2214342384, -8.7024359399], [116.2227809675, -8.6825596451], [116.225705606, -8.684444325], [116.2270912463, -8.7044071541], [116.2289480068, -8.6823758281], [116.2294514696, -8.6908428448], [116.2294609415, -8.668429876], [116.2298672129, -8.6468719638], [116.230446043, -8.65471106], [116.231197134, -8.706972441], [116.2312367732, -8.7007407239]],
+  timur: [[116.2312763359, -8.6522868737], [116.2314881802, -8.6773342875], [116.232086008, -8.6880347386], [116.232463691, -8.6705357632], [116.2350322658, -8.6567296982], [116.2387184502, -8.6766349611], [116.2387268477, -8.6412287003], [116.23884333, -8.6611595022], [116.2391400167, -8.6988042527], [116.2412637455, -8.6880019068], [116.2423172857, -8.6490402376], [116.2433740074, -8.63468622], [116.2470538038, -8.6437281782], [116.2474210737, -8.6778224346], [116.247782224, -8.671479045], [116.2532519767, -8.6421182548], [116.254697275, -8.676779014], [116.25720403, -8.641806119], [116.2582741225, -8.6569933889], [116.2595554605, -8.6645846636]]
+};
+
+const GROUPS = {
+  timur:  { name: "Timur",  color: "#58c97f" },
+  tengah: { name: "Tengah", color: "#5dade2" },
+  barat:  { name: "Barat",  color: "#e6a23c" }
+};
+const DAY_COLORS = ["#f0b94d", "#f4f1ea", "#ef8b6e"];
+
+const points = {};
+for (const key in RAW) points[key] = RAW[key].map(p => [p[1], p[0]]);
+
+const map = L.map('map', {zoomControl:false}).setView(START, 12);
+L.control.zoom({position:'bottomright'}).addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+L.circleMarker(START, {radius:8, color:'#161b19', weight:2, fillColor:'#f4f1ea', fillOpacity:1})
+  .addTo(map).bindPopup("<b>Titik Awal</b><br>" + START[0].toFixed(6) + ", " + START[1].toFixed(6));
+
+const state = { active: 'timur', dayVisible: [true, false, false] };
+const layers = {};
+const routeInfo = {};
+
+function buildGmapsUrl(pts) {
+  const origin = `${START[0]},${START[1]}`;
+  const destination = `${pts[pts.length-1][0]},${pts[pts.length-1][1]}`;
+  const waypoints = pts.slice(0, -1).map(p => `${p[0]},${p[1]}`).join('|');
+  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${origin}&destination=${destination}`;
+  if (waypoints) url += `&waypoints=${encodeURIComponent(waypoints)}`;
+  return url;
+}
+
+function buildTabs() {
+  const tabs = document.getElementById('tabs');
+  Object.keys(GROUPS).forEach(key => {
+    const g = GROUPS[key];
+    const el = document.createElement('div');
+    el.className = 'tab' + (key === state.active ? ' active' : '');
+    el.id = 'tab-' + key;
+    el.innerHTML = `<span class="dot" style="background:${g.color}"></span> ${g.name} <span class="count">(${points[key].length})</span>`;
+    el.onclick = () => switchGroup(key);
+    tabs.appendChild(el);
+  });
+}
+
+function switchGroup(key) {
+  state.active = key;
+  state.dayVisible = [true, false, false];
+  Object.keys(GROUPS).forEach(k => {
+    document.getElementById('tab-' + k).classList.toggle('active', k === key);
+    ['points','route'].forEach(t => {
+      if (layers[k] && layers[k][t]) {
+        if (k === key) map.addLayer(layers[k][t]); else map.removeLayer(layers[k][t]);
+      }
+    });
+  });
+  applyDayVisibility();
+  renderSheet(key);
+
+  const g = GROUPS[key];
+  document.getElementById('sheetSwatch').style.background = g.color;
+  document.getElementById('sheetTitle').textContent = 'Kelompok ' + g.name;
+  document.getElementById('sheetMeta').textContent = points[key].length + ' titik · 3 hari';
+
+  if (points[key].length) {
+    map.fitBounds(L.latLngBounds([START, ...points[key]]), {padding:[60,60]});
+  }
+}
+
+function addPointMarkers() {
+  for (const key in points) {
+    const g = GROUPS[key];
+    const lg = L.layerGroup();
+    points[key].forEach((p, i) => {
+      L.circleMarker(p, {radius:5, color:'#161b19', weight:1.5, fillColor:g.color, fillOpacity:0.95})
+        .bindPopup(`<b>Kelompok ${g.name}</b><br>Titik asli #${i+1}<br>${p[0].toFixed(6)}, ${p[1].toFixed(6)}`)
+        .addTo(lg);
+    });
+    layers[key] = layers[key] || {};
+    layers[key].points = lg;
+  }
+}
+
+function addOrderMarkers(key, sequence) {
+  const g = GROUPS[key];
+  const sizes = [7,7,6];
+  const dayLayers = [L.layerGroup(), L.layerGroup(), L.layerGroup()];
+  let cursor = 0;
+  for (let day = 0; day < 3; day++) {
+    for (let j = 0; j < sizes[day]; j++) {
+      const origIdx = sequence[cursor];
+      const num = cursor + 1;
+      const p = points[key][origIdx];
+      L.marker(p, {
+        icon: L.divIcon({
+          className:'',
+          html:`<div style="background:${g.color};color:#161b19;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;border:2px solid ${DAY_COLORS[day]};box-shadow:0 1px 4px rgba(0,0,0,.4);">${num}</div>`,
+          iconSize:[24,24], iconAnchor:[12,12]
+        })
+      }).bindPopup(`<b>Kelompok ${g.name} · Day ${day+1}</b><br>Kunjungan ke-${num} (Titik asli #${origIdx+1})<br>${p[0].toFixed(6)}, ${p[1].toFixed(6)}`)
+        .addTo(dayLayers[day]);
+      cursor++;
+    }
+  }
+  layers[key].order = dayLayers;
+}
+
+function applyDayVisibility() {
+  Object.keys(GROUPS).forEach(k => {
+    if (!layers[k] || !layers[k].order) return;
+    layers[k].order.forEach((lg, i) => {
+      const shouldShow = k === state.active && state.dayVisible[i];
+      if (shouldShow) map.addLayer(lg); else map.removeLayer(lg);
+    });
+  });
+}
+
+async function fetchRoute(key) {
+  const g = GROUPS[key];
+  const coordsArr = [START, ...points[key]];
+  const coordStr = coordsArr.map(c => c[1] + ',' + c[0]).join(';');
+  const url = `https://router.project-osrm.org/trip/v1/driving/${coordStr}?source=first&roundtrip=false&geometries=geojson&overview=full`;
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.code !== 'Ok') throw new Error(data.message || data.code);
+
+    const trip = data.trips[0];
+    const coords = trip.geometry.coordinates.map(c => [c[1], c[0]]);
+    layers[key].route = L.polyline(coords, {color:g.color, weight:4, opacity:0.85});
+
+    const order = data.waypoints
+      .map((w, idx) => ({idx, order:w.waypoint_index}))
+      .filter(w => w.idx !== 0)
+      .sort((a,b)=>a.order-b.order);
+    const optimizedOrigIndices = order.map(o => o.idx - 1);
+    const sequence = optimizedOrigIndices.slice().reverse();
+
+    addOrderMarkers(key, sequence);
+    routeInfo[key] = {
+      sequence,
+      distKm: (trip.distance/1000).toFixed(2),
+      durMin: (trip.duration/60).toFixed(0),
+      ok: true
+    };
+  } catch (e) {
+    routeInfo[key] = {ok:false, error: e.message};
+  }
+}
+
+function renderSheet(key) {
+  const body = document.getElementById('sheetBody');
+  const g = GROUPS[key];
+  const info = routeInfo[key];
+
+  if (!info) {
+    body.innerHTML = `<div class="route-stats">Menghitung rute jalan via OSRM...</div>`;
+    return;
+  }
+  if (!info.ok) {
+    body.innerHTML = `<div class="route-stats">Rute gagal dihitung (${info.error}). Coba muat ulang halaman.</div>`;
+    return;
+  }
+
+  let html = '';
+  html += `<div class="route-stats">Total jarak rute: <b>${info.distKm} km</b> · Estimasi waktu jalan: <b>${info.durMin} menit</b> (belum termasuk waktu sampling/wawancara)</div>`;
+
+  html += `<div class="layer-toggles">
+    <div class="chip on" id="chip-pts-${key}" onclick="toggleChip('${key}','points',this)"><span class="ind" style="background:${g.color}"></span>Titik sampel</div>
+    <div class="chip on" id="chip-route-${key}" onclick="toggleChip('${key}','route',this)"><span class="ind" style="background:${g.color}"></span>Rute jalan</div>
+  </div>`;
+
+  const sizes = [7,7,6];
+  let cursor = 0;
+  for (let day = 0; day < 3; day++) {
+    const size = sizes[day];
+    const dayPts = [];
+    let stops = '';
+    for (let j = 0; j < size; j++) {
+      const num = cursor + 1;
+      const origIdx = info.sequence[cursor];
+      const p = points[key][origIdx];
+      dayPts.push(p);
+      stops += `<li><span class="stop-num" style="background:${DAY_COLORS[day]}">${num}</span> Titik asli #${origIdx+1} <span class="stop-coord">${p[0].toFixed(5)}, ${p[1].toFixed(5)}</span></li>`;
+      cursor++;
+    }
+    const url = buildGmapsUrl(dayPts);
+    html += `
+      <div class="day-card ${day===0 ? 'open' : ''}" id="day-${key}-${day}">
+        <div class="day-card-head" onclick="toggleDay('${key}',${day})">
+          <div class="left">
+            <span class="day-badge" style="background:${DAY_COLORS[day]}">${day+1}</span>
+            Day ${day+1}
+          </div>
+          <div class="right">${size} titik <span class="chev">▾</span></div>
+        </div>
+        <div class="day-card-body">
+          <ul class="stop-list">${stops}</ul>
+          <a class="gmaps-btn" href="${url}" target="_blank" rel="noopener">Buka rute Day ${day+1} di Google Maps</a>
+        </div>
+      </div>`;
+  }
+
+  html += `<div class="start-note"><span class="dot"></span> Semua hari berangkat dari titik awal: ${START[0].toFixed(5)}, ${START[1].toFixed(5)}</div>`;
+
+  body.innerHTML = html;
+  applyDayVisibility();
+}
+
+function toggleDay(key, day) {
+  const card = document.getElementById(`day-${key}-${day}`);
+  const willOpen = !card.classList.contains('open');
+  card.classList.toggle('open', willOpen);
+  state.dayVisible[day] = willOpen;
+  applyDayVisibility();
+}
+
+function toggleChip(key, type, el) {
+  const on = el.classList.toggle('on');
+  const lyr = layers[key] && layers[key][type];
+  if (!lyr) return;
+  if (on) map.addLayer(lyr); else map.removeLayer(lyr);
+}
+
+function setupSheetDrag() {
+  const sheet = document.getElementById('sheet');
+  const handle = document.getElementById('sheetHandle');
+  let startY = 0, startTransform = 0, dragging = false;
+
+  function getTranslateY() {
+    const style = getComputedStyle(sheet);
+    const m = style.transform.match(/matrix\(([^)]+)\)/);
+    if (!m) return 0;
+    return parseFloat(m[1].split(',')[5]);
+  }
+
+  handle.addEventListener('click', () => {
+    if (dragging) return;
+    if (window.innerWidth >= 860) return;
+    if (sheet.classList.contains('expanded')) {
+      sheet.classList.remove('expanded');
+      sheet.classList.remove('full');
+    } else {
+      sheet.classList.add('expanded');
+    }
+  });
+
+  handle.addEventListener('touchstart', (e) => {
+    if (window.innerWidth >= 860) return;
+    dragging = true;
+    startY = e.touches[0].clientY;
+    startTransform = getTranslateY();
+    sheet.style.transition = 'none';
+  }, {passive:true});
+
+  handle.addEventListener('touchmove', (e) => {
+    if (!dragging) return;
+    const dy = e.touches[0].clientY - startY;
+    let newY = Math.max(0, startTransform + dy);
+    sheet.style.transform = `translateY(${newY}px)`;
+  }, {passive:true});
+
+  handle.addEventListener('touchend', (e) => {
+    if (!dragging) return;
+    dragging = false;
+    sheet.style.transition = '';
+    sheet.style.transform = '';
+    const dy = e.changedTouches[0].clientY - startY;
+    if (Math.abs(dy) < 10) return;
+    if (dy < -40) {
+      sheet.classList.add('full');
+      sheet.classList.add('expanded');
+    } else if (dy > 40) {
+      if (sheet.classList.contains('full')) sheet.classList.remove('full');
+      else sheet.classList.remove('expanded');
+    }
+  });
+}
+
+addPointMarkers();
+buildTabs();
+setupSheetDrag();
+
+(async () => {
+  for (const key of Object.keys(GROUPS)) {
+    await fetchRoute(key);
+    await new Promise(r => setTimeout(r, 500));
+  }
+  switchGroup(state.active);
+})();
+</script>
+</body>
+</html>
